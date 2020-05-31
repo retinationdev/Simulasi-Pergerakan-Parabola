@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Parabola</title>
+  <style>
+  	body {
+		height: 800px;
+		color: black;
+		background-color:skyblue;
+        margin:0px;
+        padding:0px;
+      }
+	 
+  	#screen{
+  		position:absolute;
+  		left:0;
+  		top:0;
+  		margin:0px;
+  		padding:0px;
+  	}
+  	#backdrop{
+  		position:absolute;
+  		left:0;
+  		top:0;
+  		margin:0px;
+  		padding:0px;
+  	}
+  	#input{
+		background-color: pink;
+  		position:absolute;
+  		top:540px;
+  		margin:8px;
+		padding: 20px;
+		height: 180px;
+		border: black dashed 2px;
+  	}
+	
+	#kontener{
+		background-color: pink;
+		position: absolute;
+		top: 540px;
+		left: 620px;
+		margin: 8px;
+		padding: 5px;
+		border: black dashed 2px;
+	}
+	
+  	#time-slider{
+    	width: 480px;
+	}
+	#scale-slider{
+		position:absolute;
+		left:1000px;
+		top:20px;
+	}
+	input[type=range][orient=vertical]
+	{
+		writing-mode: bt-lr; /* IE */
+		-webkit-appearance: slider-vertical; /* WebKit */
+		width: 8px;
+		height: 480px;
+		padding: 0 5px;
+	}
+	
+	br{
+		margin: 10px;
+	}
+	
+  </style>
+  <script src="http://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js" type="text/javascript"></script>
+  <script type="text/javascript">
+
+  	//init
+  	function init(){
+  		var canvas = document.getElementById("screen");
+		ctx = canvas.getContext('2d');
+		canvas.height = 540;
+		canvas.width = 1000;
+		var canvasb = document.getElementById("backdrop");
+		ctxb = canvasb.getContext('2d');
+		canvasb.height = 540;
+		canvasb.width = 1000;
+		ctx.textAlign ="center";
+		ctx.textBaseline = "middle";
+		ctx.font = "16px Arial";
+		ctxb.textAlign = "center";
+		ctxb.textBaseline = "middle";
+		ctxb.font = "16px Arial";
+		offsetx = canvas.offsetLeft;
+		offsety = canvas.offsetTop;
+		document.getElementById("screen").onmousedown = canvasClick;
+		document.getElementById("screen").onmouseup = canvasUnclick;
+		document.getElementById("screen").onmousemove = canvasMove;
+		calcValues();
+		drawScene();
+		drawTrajectory(1);
+  	}
+	//window.onload = function(){
+		//init();
+	//}
+	
+  	//global declarations
+  	var projectile = {
+  		"pos":{"x":0,"y":0},
+  		"vel":{"vx":0,"vy":0}
+  	};
+  	var g = -9.80665;
+  	var time = 0; //time
+  	var v0= 10;//initial velocity (muzzle)
+  	var theta = Math.PI/4;//trajectory angle
+  	var x0 = 0;//initial position
+  	var y0 = 0;
+  	var h = 0;//landing platform height
+  	var moveLanding = false;
+  	var moveLaunch = false;
+  	var moveAngle = false;
+  	var tSetting = 0;
+  	var SCALE = 64;//scaling for smaller/larger trajectories
+  		// 48 <= v0 < 96 is 1:1
+  		// 24 - 48 4:1 12*2^2
+  		// 12 - 24 16:1 12*2^1
+  		//  1 - 12 64:1 12*2^0
+  		// 96 - 192 1:4 etc...
+  	var animating = false;
+  	
+  	var target = {"X":0,"y":0,"active":false};
+  	
+  	var landingT = 0;
+  	var landingD = 0;
+  	var maxH = 0;
+  	var maxHtime = 0;
+  	var minV = 0;
+  	var xoffset = 0;
+	var yoffset = 0;
+  	//kinematics
+  	//x(t) = x0 + v0*cos(theta)*t
+  	//y(t) = y0 + v0*sin(theta)*t + 0.5*g*t*t;
+  	//vf = sqrt(v0*v0 + 2*g*(xf-x0))
+  	//vy(t) = vy0 + g*t
+  	//y(t) = (v0 + vf)*t/2
+  	//control point equations
+  	//x0,y0,vy0/vx0,xf,yf,vyf/vxf
+  	//sfxf-s0x0+y0-yf = px(sf-s0)
+  	//px = ()/()
+  	//py = s0(px-x0)+y0
+	function calcValues(){
+		//first get max height
+		maxHtime = -v0*Math.sin(theta)/g;
+		maxH = y0 + (v0*Math.sin(theta)*maxHtime) + (0.5*g*maxHtime*maxHtime);
+		if (maxH < h) {
+			alert("kurang kecepatan!");
+			h = Math.floor(maxH);
+			canvasUnclick();
+		}
+		landingT = quadraticFormula(0.5*g,v0*Math.sin(theta),y0-h,-1);//landing time
+		landingD = x0 + v0*Math.cos(theta)*landingT;//landing displacement (x)
+		minV = v0*Math.cos(theta);//minimum velocity at top of trajectory
+	}
+
+	function quadraticFormula(a,b,c,sign){
+		if (b*b-(4*a*c) < 0) return false;//imaginary solution
+		return (-b+(sign*Math.sqrt(b*b-(4*a*c))))/(2*a);
+	}
+	
+	function justifyX(x){
+		if (x < 250) return "left";
+		else if (x > 750) return "right";
+		else return "center";
+	}
+	
+	function defineTrajectory(x,y){
+		tanTheta1 = quadraticFormula(g*x*x/(2*v0*v0),x,-(y-y0)+(g*x*x/(2*v0*v0)),1);
+		tanTheta2 = quadraticFormula(g*x*x/(2*v0*v0),x,-(y-y0)+(g*x*x/(2*v0*v0)),-1);
+		//console.log(tanTheta1 + " " + tanTheta2);
+		if (tanTheta1 > 0) theta = Math.atan(tanTheta1);//for now...
+		else theta = Math.atan(tanTheta2);
+		$('#angle').val(theta*180/Math.PI);
+		target.x = x;
+		target.y = y;
+		target.active = true;
+		calcValues();
+    	drawScene();
+    	drawTrajectory();
+	}
+
+	/////////////////////
+	///////DRAWING///////
+	function drawScene(){
+		//ctx.clearRect(0,0,960,540);
+		ctxb.clearRect(0,0,1000,540);
+		var skygradient = ctxb.createLinearGradient(480,0,480,540);
+				// Add colors
+				skygradient.addColorStop(0.00, 'rgba(50, 119, 255, 1.0)');
+				skygradient.addColorStop(0.30, 'rgba(127, 201, 255, 1.0)');
+				skygradient.addColorStop(0.75, 'rgba(191, 244, 255, 1.0)');
+				skygradient.addColorStop(1.00, 'rgba(255, 255, 255, 1.0)');
+      
+		ctxb.fillStyle = skygradient;
+		ctxb.fillRect(0,0,1000,540);
+		ctxb.fillStyle = "black";
+		ctxb.strokeStyle = "hsla(0,0%,0%,0.4)";
+		//draw landing platform
+		ctxb.fillRect(SCALE*maxHtime*minV+40,500-(h*SCALE),960-(SCALE*maxHtime*minV),40+(h*SCALE));
+		//draw launch platform
+		ctxb.fillRect(0,500-(y0*SCALE),SCALE*maxHtime*minV+40,40+(y0*SCALE));
+		//draw launcher
+		ctxb.lineWidth = 1;
+		ctxb.beginPath();
+		ctxb.moveTo(40,500-(y0*SCALE));
+		ctxb.lineTo(40+(40*Math.cos(theta)),500-(y0*SCALE)-(40*Math.sin(theta)));
+		ctxb.stroke();
+		//height/angle labels
+		ctxb.fillStyle = "white";
+		ctxb.textAlign = "right";
+		ctxb.fillText(h.toFixed(2) + " m",988,520);
+		ctxb.textAlign = "left";
+		ctxb.fillText(y0.toFixed(2) + " m  Sudut: "+ Math.round(theta*180/Math.PI) + "\xB0",12,520);
+		ctxb.textAlign = "center";
+		//angle label
+		//ctxb.fillText("Angle,20%,0.5)";
+		ctxb.lineWidth = 1;
+		var incsize = Math.floor(920/SCALE/9);
+		var inc = Math.floor(920/SCALE/incsize)-1;
+		for (var m=0;m<=inc;m++){
+			ctxb.beginPath();
+			ctxb.moveTo(m*incsize*SCALE+40.5,0);
+			ctxb.lineTo(m*incsize*SCALE+40.5,10);
+			ctxb.stroke();
+			ctxb.fillText(m*incsize,m*incsize*SCALE+50,20);
+		}
+		incsize = Math.floor(500/SCALE/5);
+		inc = Math.floor(500/SCALE/incsize)-1;
+		for (var n=0;n<=inc;n++){
+			ctxb.beginPath();
+			ctxb.moveTo(0,-n*incsize*SCALE+500.5);
+			ctxb.lineTo(10,-n*incsize*SCALE+500.5);
+			ctxb.stroke();
+			ctxb.fillText(n*incsize,20,-n*incsize*SCALE+492);
+		}
+		//draw target
+		if (target.active){
+			ctxb.strokeStyle = "red";
+			ctxb.lineWidth = 3;
+			ctxb.beginPath();
+			ctxb.arc(target.x*SCALE+40,-target.y*SCALE+500,1,0,2*Math.PI);
+			ctxb.stroke();
+			ctxb.beginPath();
+			ctxb.arc(target.x*SCALE+40,-target.y*SCALE+500,6,0,2*Math.PI);
+			ctxb.stroke();
+			ctxb.beginPath();
+			ctxb.arc(target.x*SCALE+40,-target.y*SCALE+500,11,0,2*Math.PI);
+			ctxb.stroke();
+		}
+		
+	}
+	
+	function drawTrajectory(tpercent){
+		ctx.clearRect(0,0,1000,540);
+		var t = (tpercent) ? tpercent*landingT/100 : tSetting;
+		t = (t > landingT) ? landingT : t;
+		tSetting = t;//also need to adjust time slider
+		$('#time-slider').val(Math.floor(t/landingT*100));
+		//position at time t
+		var xf = (v0*Math.cos(theta)*t + x0)*SCALE;
+		var yf = (v0*Math.sin(theta)*t + (0.5*g*t*t) + y0)*SCALE;
+		//velocity at time t
+		var vxf = (v0*Math.cos(theta))*SCALE;
+		var vyf = (v0*Math.sin(theta) + (g*t))*SCALE;
+		//calculate parabolic control point
+		var px = ((xf*vyf/vxf)-(x0*Math.tan(theta))+(SCALE*y0)-yf)/((vyf/vxf)-Math.tan(theta));
+		var py = Math.tan(theta)*(px-x0) + (SCALE*y0);
+		//create gradient
+		var speedcolor = (vxf !== 0) ? Math.abs(vyf/SCALE)/v0 : Math.abs(vyf/SCALE)/v0;
+		var vel = Math.sqrt(Math.pow(vxf/SCALE,2)+Math.pow(vyf/SCALE,2));
+		var speedcolor2 = vel/v0;
+		if (speedcolor2 > 1) speedcolor2 = 1;
+		speedcolor = (isNaN(speedcolor)) ? 1 : Math.round(120*speedcolor);
+		var grd = ctx.createRadialGradient(xf+40,500-yf,1,xf+40,500-yf,200);
+				grd.addColorStop(0.0,'hsla('+(15+speedcolor)+',80%,'+(speedcolor2*50)+'%,0.1)');
+				//grd.addColorStop(0.5,'rgba(200,200,50,0.25)');
+				grd.addColorStop(1.0,'hsla('+(15+speedcolor)+',70%,'+(speedcolor2*50)+'%,0.0)');
+		var grd2 = ctx.createRadialGradient(xf+40,500-yf,1,xf+40,500-yf,100);
+				grd2.addColorStop(0.0,'hsla(0,100%,100%,0.5)');
+				//grd.addColorStop(0.5,'rgba(200,200,50,0.25)');
+				grd2.addColorStop(1.0,'hsla(0,100%,100%,0.0)');
+		//draw parabola
+		ctx.strokeStyle = grd;
+		for (var lw=12;lw>0;lw--){
+			ctx.lineWidth = lw;
+			ctx.beginPath();
+			ctx.moveTo(x0+40,500-(y0*SCALE));
+			ctx.quadraticCurveTo(px+40,500-py,xf+40,500-yf);
+			ctx.stroke();
+		}
+		//draw projectile
+		var grd3 = ctx.createRadialGradient(xf+40,500-yf,1,xf+40,500-yf,6);
+				grd3.addColorStop(0.0,'hsla('+(15+speedcolor)+',80%,'+(speedcolor2*50)+'%,0.7)');
+				//grd.addColorStop(0.5,'rgba(200,200,50,0.25)');
+				grd3.addColorStop(1.0,'hsla('+(15+speedcolor)+',80%,'+(speedcolor2*50)+'%,0.0)');
+		ctx.fillStyle = grd3;
+		var vangle = Math.atan2(vxf,vyf);
+		ctx.beginPath();
+		ctx.arc(xf+40,500-yf,12,vangle+Math.PI,vangle);
+		ctx.fill();
+		//draw white center
+		ctx.strokeStyle = grd2;
+		for (var lw=4;lw>0;lw--){
+			ctx.lineWidth = lw;
+			ctx.beginPath();
+			ctx.moveTo(x0+40,500-(y0*SCALE));
+			ctx.quadraticCurveTo(px+40,500-py,xf+40,500-yf);
+			ctx.stroke();
+		}
+		ctx.fillStyle = "white";
+		ctx.beginPath();
+		ctx.arc(xf+40,500-yf,2,0,2*Math.PI);
+		ctx.fill();
+		//create timecode with correct leading zeros
+		var timecode = (Math.floor(t) >= 600) ? "" : "0";
+		timecode += (Math.floor(t) < 60) ? "0:" : Math.floor(t / 60) + ":";
+		timecode = (Math.floor(t) < 10) ? "00:0" : timecode;
+		//draw clock
+		ctx.strokeStyle = "hsla(0,0%,100%,0.5)";
+		ctx.lineWidth = 4;
+		ctx.strokeRect(918,2,80,40);
+		ctx.fillText(timecode + parseFloat(Math.round(t*100)/100).toFixed(2),958,22);
+		ctx.lineWidth = 1;
+		//draw special moments
+		if (t/landingT > maxHtime/landingT - 0.05 && t/landingT < maxHtime/landingT + 0.05) { //maxH
+			document.getElementById('tmax').value = Math.round(maxH*100)/100;
+			ctx.fillStyle = "red";
+			ctx.strokeStyle = "blue";
+			ctx.textAlign = justifyX(SCALE*minV*maxHtime+40);
+			ctx.fillText("Ketinggian Maksimal "+Math.round(maxH*100)/100+" m dalam "+Math.round(maxHtime*100)/100+" detik",SCALE*minV*maxHtime+40,480-(maxH*SCALE));
+			ctx.fillText("x = "+ Math.round(minV*maxHtime*100)/100,SCALE*minV*maxHtime+40,520-(maxH*SCALE))
+			ctx.beginPath();
+			ctx.moveTo(SCALE*minV*maxHtime,499.5-Math.floor(maxH*SCALE));
+			ctx.lineTo(SCALE*minV*maxHtime+80,499.5-Math.floor(maxH*SCALE));
+			ctx.moveTo(SCALE*minV*maxHtime+40,505-(maxH*SCALE));
+			ctx.lineTo(SCALE*minV*maxHtime+40,495-(maxH*SCALE));
+			ctx.stroke();
+			ctx.textAlign = "center";
+		} else if (t/landingT > 0.95 && t/landingT < 1.05) {
+			document.getElementById('jarak').value = Math.round(landingD*100)/100;
+			ctx.fillStyle = "white";
+			ctx.strokeStyle = "white";
+			ctx.textAlign = justifyX(SCALE*landingD+40);
+			ctx.fillText("Berhenti di "+Math.round(landingD*100)/100+" m dalam "+Math.round(landingT*100)/100+" detik",SCALE*landingD+40,520-(h*SCALE));
+			ctx.beginPath();
+			ctx.moveTo(Math.floor(SCALE*landingD)+40.5,480-(h*SCALE));
+			ctx.lineTo(Math.floor(SCALE*landingD)+40.5,510-(h*SCALE));
+			ctx.stroke();
+			ctx.textAlign = "center";
+		}
+		//draw velocity
+		ctx.fillStyle = "black";
+		ctx.fillText(Math.round(vel*100)/100 + " m/s",948,100);
+	}
+	
+	///////ANIMATING///////
+	window.requestAnimFrame = (function(){
+		return window.requestAnimationFrame || window.webkitRequesAnimationFrame || window.mozRequesAnimationFrame || window.oRequesAnimationFrame || window.msRequesAnimationFrame ||
+		function (callback){
+			window.setTimeout(callback, 1000/60);
+		};
+	})();
+	
+	function animate(t){
+		if (t <= landingT && animating) requestAnimFrame(function(){animate(1/60 + t)});
+		else animating = false;
+		drawTrajectory(100*t/landingT);
+	}
+	
+	///////INPUT///////
+	///////////////////
+	function canvasClick(event){
+			event = event || window.event;
+			var scrollX = window.pageXOffset || document.body.scrollLeft;
+			var scrollY = window.pageYOffset || document.body.scrollTop;
+			var clickX = event.clientX + scrollX - xoffset;
+			var clickY = event.clientY + scrollY - yoffset;
+		//check to see if clicked on left or right
+		if (clickX > SCALE*maxHtime*minV + 40 && clickY > 500 - (h*SCALE)){
+			//clicked to move the right side
+			moveLanding = true;
+			return;
+		} else if (clickX < SCALE*maxHtime*minV + 40 && clickY > 500 - (y0*SCALE)){
+			moveLaunch = true;
+			return;
+		} else if (clickX > 40) {
+			defineTrajectory(Math.round(100*(clickX-40)/SCALE)/100,Math.round(100*(500 - clickY)/SCALE)/100);
+		}
+	}
+	
+	function canvasUnclick(event){
+		moveLanding = false;
+  		moveLaunch = false;
+  		moveAngle = false;
+	}
+	
+	function canvasMove(event){
+		event = event || window.event;
+    	var scrollX = window.pageXOffset || document.body.scrollLeft;
+    	var scrollY = window.pageYOffset || document.body.scrollTop;
+    	var moveX = event.clientX + scrollX - xoffset;
+    	var moveY = event.clientY + scrollY - yoffset;
+    	
+    	//handle the movement
+    	if (moveLanding){
+    		h = Math.round(100*(500 - moveY)/SCALE)/100;
+    		if (h < 0) h = 0;
+    		calcValues();
+    		drawScene();
+    		drawTrajectory();
+    		return;
+    	} else if (moveLaunch){
+    		y0 = Math.round(100*(500 - moveY)/SCALE)/100;
+    		if (y0 < 0) y0 = 0;
+    		calcValues();
+    		drawScene();
+    		drawTrajectory();
+    	}
+    }
+	
+	$(document).ready(function(){
+		init();
+		$('#time-slider').change(function(){
+			if (animating) return;
+			drawTrajectory(parseInt($('#time-slider').val()));
+		});
+		$('#scale-slider').change(function(){
+			if (parseInt($('#scale-slider').val()) < 0) SCALE = -parseInt($('#scale-slider').val());
+			else if (parseInt($('#scale-slider').val()) > 0) SCALE = 1/parseInt($('#scale-slider').val());
+			else SCALE = 1;
+			drawScene();
+    		drawTrajectory();
+		});
+		$('#angle').change(function(){
+			theta = parseInt($('#angle').val())*Math.PI/180;
+			target.active = false;
+			calcValues();
+			drawScene();
+			drawTrajectory(parseInt($('#time-slider').val()));
+		});
+		$('#velocity').change(function(){
+			v0 = parseFloat($('#velocity').val());
+			//console.log(v0);
+			var i = Math.floor(v0/12);
+			var c = 0;
+			while (i >=1){
+				i /= 2;
+				c++;
+			}
+			c -= 4;
+			SCALE = (c < 0) ? Math.pow(4,-c-1)/1 : 1/Math.pow(4,c+1);//2c?
+			var slider = (SCALE >= 1) ? -SCALE : Math.round(1/SCALE);
+			$('#scale-slider').val(slider);
+			target.active = false;
+			calcValues();
+			drawScene();
+			drawTrajectory();
+		});
+		$('#gravity').change(function(){
+			g = -parseFloat($('#gravity').val());
+			if (isNaN(g)) {
+				g = -9.80665;
+				$('#gravity').val(-g);
+			}
+			target.active = false;
+			calcValues();
+			drawScene();
+			drawTrajectory();
+		});
+		$('#launch').click(function(){
+			animating = !animating;
+			animate(0);
+		});
+	});
+		
+  </script>
+</head>
+<body>
+	<canvas id="backdrop" width="1000" height="540">Your browser does not support HTML 5</canvas>
+	<canvas id="screen" width="1000" height="540"></canvas>
+	<input type="range" orient="vertical" id="scale-slider" value="-64" min="-64" max="64"><br/>
+	<div id="input">
+	<button id="launch">Mulai!</button>
+			<input type="range" id="time-slider" value="1" min="0" max="100"><br/>
+			Kecepatan: 
+			<input type="number" id="velocity" value="10"> m/s<br/>
+			Sudut: 
+			<input type="range" id="angle" value="45" min="0" max="90"><br/>
+			Gravitasi:
+			<input type="number" id="gravity" value="9.80665" min="0">m/s&#178;<br/><br/>
+			</div>
+			<div id= "kontener">
+			<table>
+			<tr><td>Hasil : </td></tr>
+			<tr><td>Tinggi Maksimal : </td>
+			<td><input type="text" id="tmax" value="" readonly style="cursor:not-allowed; background-color: white;"/> m</td></tr>
+			<tr><td>Jarak : </td>
+			<td><input type="text" id="jarak" value="" readonly style="cursor:not-allowed; background-color: white;"/> m</td></tr>
+			</table>
+	</div>
+</body>
+</html>
